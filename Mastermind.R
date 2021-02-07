@@ -318,11 +318,13 @@ Game <- R6::R6Class("Game",
                           code_length = 4,
                           allow_duplicates = TRUE,
                           max_turns = 12) {
+
       # check input
       checkmate::assert_character(player_name,
         len = 1,
         min.chars = 1, any.missing = FALSE
       )
+      checkmate::assert_flag(allow_duplicates)
       # colors must be either a numeric value or a vector of colors
       # currently are maximal 12 different colors available
       checkmate::assert(
@@ -334,13 +336,15 @@ Game <- R6::R6Class("Game",
         ),
         checkmate::check_subset(colors, colors())
       )
-
+      # if no duplicates are allowed in the code,
+      # the length of the code is restricted to the number of colors
       checkmate::assert_integerish(code_length,
         len = 1,
         any.missing = FALSE,
-        lower = 2
+        lower = 2,
+        upper = ifelse(allow_duplicates, Inf,
+                       ifelse(is.numeric(colors), colors, length(colors)))
       )
-      checkmate::assert_flag(allow_duplicates)
       checkmate::assert_count(max_turns,
         positive = TRUE
       )
@@ -564,5 +568,6 @@ Game <- R6::R6Class("Game",
   )
 )
 
+# play casual
 game2 <- Game$new("marc")
 game2$guess("red", "blue", "orange", "red")
