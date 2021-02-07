@@ -1,5 +1,9 @@
 # class representing a game log for one game
 GameLog <- R6::R6Class("GameLog",
+  private = list(
+    .max_turns = NA,
+    .code_length = NA
+  ),
   public = list(
     events = NA,
     initialize = function(time,
@@ -37,6 +41,9 @@ GameLog <- R6::R6Class("GameLog",
       event_data$time <- as.POSIXct(event_data$time, origin = "1970/01/01")
       # assign it to the events attribute
       self$events <- event_data
+      # assign max_turns and code_length to the corresponding attributes
+      private$.max_turns <- max_turns
+      private$.code_length <- code_length
     },
     new_event = function(time,
                          event_name,
@@ -66,6 +73,108 @@ GameLog <- R6::R6Class("GameLog",
     },
     print = function() {
       print(self$events)
+    },
+    plot = function() {
+      # check if there have already been guesses made
+      if (nrow(self$events) == 1) {
+        stop("No guesses have been made yet")
+      }
+      # save variables in calling environment for easier readability
+      max_turns <- private$.max_turns
+      code_length <- private$.code_length
+      # get columns which contain color-guesses
+      pos_columns <- stringr::str_detect(names(self$events), "^pos[:digit:]+")
+      pos_columns <- self$events[-1, pos_columns]
+      # create grid for plot of guesses
+      guesses_grid <- data.frame(tidyr::pivot_longer(pos_columns,
+        cols = names(pos_columns)
+      ))
+      # add turn variable
+      guesses_grid$turn <- rep(seq_len(nrow(pos_columns)), each = code_length)
+      # rename variables
+      names(guesses_grid) <- c("position", "color", "turn")
+      # compute a visually attractive number of breaks for turn axis
+      turn_break_steps <- ceiling(max_turns / 12)
+      turn_breaks <- seq(1, max_turns, by = turn_break_steps)
+      # compute a nice size for the dots
+      dot_size <- min(50 / code_length,
+                      12.5 * 10 / max_turns)
+      # plot colors in grid
+      guess_plot <- ggplot2::ggplot(
+        data = guesses_grid,
+        mapping = ggplot2::aes(turn,
+          position,
+          color = color
+        )
+      ) +
+        # change according to guess
+        ggplot2::scale_color_manual(
+          breaks = unique(guesses_grid$color),
+          values = unique(guesses_grid$color)
+        ) +
+        ggplot2::geom_point(size = dot_size) +
+        ggplot2::scale_y_discrete(name = NULL,
+                                  breaks = NULL) +
+        # extend axis to maximal allowed turns manually
+        ggplot2::scale_x_continuous(
+          name = "turn",
+          breaks = turn_breaks,
+          limits = c(0, max_turns + 0.5),
+          # expand is necessary for axis being on the same height
+          expand = ggplot2::expansion(add = 0)
+        ) +
+        ggplot2::theme_dark() +
+        ggplot2::theme(legend.position = "none") +
+        ggplot2::coord_flip()
+
+      # extract feedback information from events
+      feedback_information <- self$events[-1, c("positions_correct", "colors_correct")]
+      # transform into long format
+      feedback_long <- data.frame(tidyr::pivot_longer(feedback_information,
+        cols = names(feedback_information)
+      ))
+      # add turn variable
+      feedback_long$turn <- rep(seq_len(nrow(feedback_information)), each = 2)
+      # rename variables
+      names(feedback_long) <- c("feedback_type", "frequency", "turn")
+      # plot bar chart showing frequencys
+      feedback_plot <- ggplot2::ggplot(feedback_long, mapping = ggplot2::aes(turn,
+        frequency,
+        fill = feedback_type
+      )) +
+        ggplot2::geom_bar(position = "stack", stat = "identity") +
+        ggplot2::scale_y_continuous(
+          name = NULL,
+          breaks = seq(0, code_length),
+          limits = c(0, code_length)
+        ) +
+        ggplot2::scale_x_continuous(
+          name = NULL,
+          breaks = turn_breaks,
+          limits = c(0, max_turns + 0.5),
+          # expand is necessary for axis being on the same height
+          expand = ggplot2::expansion(add = 0)
+        ) +
+        # change the title, labels and colors of legend
+        ggplot2::theme(legend.title = ggplot2::element_blank()) +
+        ggplot2::scale_fill_manual(
+          labels = c("Correct colors,\nwrong positions",
+                     "Correct colors,\nright positions"),
+          values = c("white", "black")
+        ) +
+        ggplot2::theme_dark() +
+        ggplot2::theme(legend.title = ggplot2::element_blank()) +
+        ggplot2::coord_flip()
+
+      # Combine the plots
+      g <- gridExtra::gtable_cbind(ggplot2::ggplotGrob(guess_plot),
+        ggplot2::ggplotGrob(feedback_plot),
+        size = "max"
+      )
+
+      # Draw it
+      grid::grid.newpage()
+      grid::grid.draw(g)
     }
   )
 )
@@ -83,10 +192,12 @@ ScoreBoard <- R6::R6Class("ScoreBoard",
                           code_length,
                           allow_duplicates) {
       # input  checking
+      # currently are maximal 12 different colors available
       checkmate::assert_integerish(colors,
         len = 1,
         any.missing = FALSE,
-        lower = 2
+        lower = 2,
+        upper = 12
       )
       checkmate::assert_integerish(code_length,
         len = 1,
@@ -213,11 +324,13 @@ Game <- R6::R6Class("Game",
         min.chars = 1, any.missing = FALSE
       )
       # colors must be either a numeric value or a vector of colors
+      # currently are maximal 12 different colors available
       checkmate::assert(
         checkmate::check_integerish(colors,
           len = 1,
           any.missing = FALSE,
-          lower = 2
+          lower = 2,
+          upper = 12
         ),
         checkmate::check_subset(colors, colors())
       )
@@ -236,10 +349,15 @@ Game <- R6::R6Class("Game",
 
       # if colors is a number create a palette
       if (is.numeric(colors)) {
+        # default list of colors
+        potential_colors <-
+          c(
+            "red", "blue", "yellow", "green", "orange", "white",
+            "purple", "brown", "pink", "cyan", "magenta", "turquoise"
+          )
+
         private$.n_colors <- colors
-        private$.colors <- names(palette.colors(colors,
-          palette = "Alphabet"
-        ))
+        private$.colors <- potential_colors[seq_len(colors)]
       } else {
         # otherwise use the colors
         private$.n_colors <- length(colors)
@@ -275,6 +393,10 @@ Game <- R6::R6Class("Game",
       cat("Turns played: ", private$.turns_played, "\n")
       cat("Turns remaining: ", private$.max_turns - private$.turns_played)
     },
+    plot = function() {
+      # simply uses the plot method on .game_log
+      private$.game_log$plot()
+    },
     # reset current game (new code with same configurations)
     reset = function() {
       private$.code <- sample(private$.colors,
@@ -291,8 +413,8 @@ Game <- R6::R6Class("Game",
       cat("Use colors {", private$.colors, "} for guesses \n")
     },
     # method to guess the code
-    guess = function(...) {
-      guess = c(...)
+    guess = function(..., show_logs = FALSE) {
+      guess <- c(...)
       ## check input
       # the guess must have the same length as the code
       checkmate::assert_character(guess,
@@ -300,6 +422,8 @@ Game <- R6::R6Class("Game",
       )
       # all entries of the vector must be in the pre-defined colors
       checkmate::assert_subset(guess, private$.colors)
+      # check show_legs to be a logical value
+      checkmate::assert_flag(show_logs)
       # check duplicates are not allowed check if condition is fulfilled
       if (!(private$.allow_duplicates)) {
         if (!identical(guess, unique(guess))) {
@@ -374,6 +498,9 @@ Game <- R6::R6Class("Game",
           time_score
         )
 
+        # plot guess
+        private$.game_log$plot()
+
         # print congratulations and game stats
         cat("Congratulations! You have won the game! \n")
         cat("\n Game stats: \n")
@@ -400,6 +527,9 @@ Game <- R6::R6Class("Game",
           turns_left
         )
 
+        # plot guess
+        private$.game_log$plot()
+
         # print GAME OVER message and game stats
         cat("GAME OVER \n")
         cat("The actual code was: ", private$.code, "\n")
@@ -417,8 +547,12 @@ Game <- R6::R6Class("Game",
           correct_col,
           turns_left
         )
-        # print game log
-        private$.game_log$print()
+        # print game log if show_logs is set to TRUE
+        if (show_logs) {
+          private$.game_log$print()
+        }
+        # plot guess
+        private$.game_log$plot()
       }
     }
   ),
@@ -429,3 +563,6 @@ Game <- R6::R6Class("Game",
     }
   )
 )
+
+game2 <- Game$new("marc")
+game2$guess("red", "blue", "orange", "red")
