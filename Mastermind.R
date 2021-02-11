@@ -402,7 +402,15 @@ Game <- R6::R6Class("Game",
       private$.game_log$plot()
     },
     # reset current game (new code with same configurations)
-    reset = function() {
+    # name can be adapted
+    reset = function(player_name = private$.player) {
+      # check input
+      checkmate::assert_character(player_name,
+                                  len = 1,
+                                  min.chars = 1, any.missing = FALSE
+      )
+      # generate random code
+      private$.player <- player_name
       private$.code <- sample(private$.colors,
         size = private$.code_length,
         replace = private$.allow_duplicates
