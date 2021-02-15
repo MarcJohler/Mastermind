@@ -293,7 +293,7 @@ Game <- R6::R6Class("Game",
     .game_log = NA,
     find_score_board = function() {
       # find all environment objects
-      environments <- ls.str(mode = "environment", envir = globalenv())
+      environments <- ls(pattern = "score_board", envir = globalenv())
       # loop over environments to find the score boards and check their configs
       for (object_name in environments) {
         object <- eval(parse(text = object_name))
